@@ -1,33 +1,42 @@
 name: Continous Integration
-on: [push]
+on: [push, pull_request]
 jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        EVM_EMACS: [emacs-25.3-travis]
+        # 26.1 = Package-Requires floor.  30.1 = first version with
+        # `internal--get-default-lexical-binding-function' (the hook the
+        # cookie support relies on).  snapshot = current master, future-proofing.
+        emacs_version: ['26.1', '30.1', 'snapshot']
     steps:
-    - uses: actions/checkout@v1
-    - uses: actions/setup-ruby@v1
-    - name: install Emacs
-      env:
-        EVM_EMACS: ${{matrix.EVM_EMACS}}
-      run: |
-        export PATH=$HOME/.evm/bin:$PATH
-        git clone https://github.com/rejeep/evm.git $HOME/.evm
-        evm config path /tmp
-        evm install $EVM_EMACS --use --skip
-    - name: run test       
-      run: |
-        export PATH=$HOME/.evm/bin:$PATH
-        emacs -Q --batch -L . \
-         --load literate-elisp \
-         --eval "(setf literate-elisp-test-p t)" \
-         --funcall literate-elisp-batch-load literate-elisp.org \
-         --funcall literate-elisp-batch-load readme.org \
-         --funcall ert-run-tests-batch-and-exit
+      - uses: actions/checkout@v4
+      - uses: purcell/setup-emacs@master
+        with:
+          version: ${{ matrix.emacs_version }}
 
-        
-        
+      - name: ert suite (literate-elisp.org + readme.org)
+        run: |
+          emacs -Q --batch -L . \
+            --load literate-elisp \
+            --eval "(setf literate-elisp-test-p t)" \
+            --funcall literate-elisp-batch-load literate-elisp.org \
+            --funcall literate-elisp-batch-load readme.org \
+            --funcall ert-run-tests-batch-and-exit
 
-        
+      - name: lexical-binding regression — no-cookie file stays dynamic (all versions)
+        run: |
+          emacs -Q --batch -L . -l literate-elisp \
+            --eval "(literate-elisp-load \"./tests/test-no-cookie.org\")" \
+            --eval "(literate-elisp-test-no-cookie-run)"
+
+      - name: lexical-binding cookie repro — 3 lambda-capture tests (Emacs >= 30 only)
+        # The fix requires `internal--get-default-lexical-binding-function',
+        # which lands in Emacs 30.  On 26.1 the boundp guard makes the fix
+        # a no-op and these repros would still fail by design.
+        if: matrix.emacs_version != '26.1'
+        run: |
+          emacs -Q --batch -L . -l literate-elisp \
+            --eval "(literate-elisp-load \"./tests/test-lexical-binding.org\")" \
+            --eval "(literate-elisp-test-run-all)"
