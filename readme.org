@@ -20,6 +20,7 @@
   - [[#how-to-insert-code-block-quickly][how to insert code block quickly]]
   - [[#load-an-org-file][load an org file]]
   - [[#byte-compile-an-org-file][byte compile an org file]]
+  - [[#lexical-binding-for-elisp-code-blocks][lexical binding for elisp code blocks]]
   - [[#a-new-code-block-header-argument-load][a new code block header argument ~load~]]
   - [[#compatibility-with-other-libraries][compatibility with other libraries]]
     - [[#support-for-emacs-lisp-refs][support for Emacs Lisp-Refs]]
@@ -125,6 +126,37 @@ For example, This org file can be compiled with the following code.
 (literate-elisp-byte-compile-file "readme.org")
 #+END_SRC
 Now the target file ~readme.org.elc~ is ready to use.
+
+** lexical binding for elisp code blocks
+By default ~literate-elisp-load~ evaluates code blocks with *dynamic* binding,
+because Emacs's standard first-line cookie parser only accepts ~;; -*- ... -*-~
+or ~#! ... ; -*- ... -*-~ — not the ~# -*- mode: org -*-~ used by org files.
+
+The most common symptom: a lambda inside ~run-at-time~,
+~set-process-filter~, or ~set-process-sentinel~ closes over a ~let~-bound
+variable, and when it fires later Emacs signals ~void-variable~.
+
+To opt into *lexical* binding for a single org file, declare it on the very
+first line, alongside the org mode marker:
+#+BEGIN_EXAMPLE
+# -*- mode: org; lexical-binding: t; -*-
+#+END_EXAMPLE
+That cookie is detected by ~literate-elisp~ at load time (Emacs 30+,
+via ~internal--get-default-lexical-binding-function~).  Org files without
+the cookie keep the legacy dynamic-binding behavior, so no existing file
+is affected.
+
+#+BEGIN_SRC elisp :load no
+;; Same code, two different outcomes depending on first-line cookie:
+(defun example-closure ()
+  (let ((counter 42))
+    (run-at-time 0 nil
+                 (lambda () counter))))   ; lexical: 42 ; dynamic: void-variable
+#+END_SRC
+
+Regression tests live at ~tests/test-lexical-binding.org~ (three repros that
+fail without the cookie) and ~tests/test-no-cookie.org~ (no-cookie file
+stays on the dynamic path).
 
 ** a new code block header argument ~load~
 Source blocks in a literate program can serve a variety of

@@ -1,0 +1,140 @@
+# -*- mode: org; lexical-binding: t; -*-
+#+TITLE: Test: lexical-binding cookie in first line of .org file
+#+PROPERTY: literate-load yes
+
+* Why this file exists
+:PROPERTIES:
+:CUSTOM_ID: overview
+:END:
+
+CLAUDE.md (across multiple projects) warns: =literate-elisp= does NOT
+recognize ~lexical-binding: t~ in the org file header. Every src block
+is evaluated with dynamic binding. Lambdas in =run-at-time= /
+=set-process-filter= / =set-process-sentinel= that close over outer
+=let= variables therefore fail with ~void-variable~ when fired later.
+
+The first line of *this* file is:
+
+#+begin_example
+,# -*- mode: org; lexical-binding: t; -*-
+#+end_example
+
+After the proposed fix, ~literate-elisp-load~ should honour this
+cookie and run the src blocks below with ~lexical-binding=t~, making
+the assertions pass.
+
+Run from the shell:
+
+#+begin_example
+emacs -Q --batch \
+  -L /Users/jingtao/projects/literate-elisp \
+  -l literate-elisp \
+  -l /Users/jingtao/projects/literate-elisp/tests/test-lexical-binding.org \
+  --eval '(literate-elisp-test-run-all)'
+#+end_example
+
+Exit code 0 ⇒ pass; non-zero ⇒ bug still present (or fix wrong).
+
+* Repro 1 — closure-over-=let= (the classic dotimes test)
+:PROPERTIES:
+:CUSTOM_ID: repro-closures
+:END:
+
+Under *lexical* binding, each lambda captures its own =captured=
+value, returning ~(0 1 2)~. Under *dynamic* binding, =captured= is
+unbound by the time the lambdas fire — Emacs signals ~void-variable~.
+
+#+begin_src elisp
+(defun literate-elisp-test-closures ()
+  "Return a list of three values from closures that each captured a different `i'."
+  (let (closures)
+    (dotimes (i 3)
+      (let ((captured i))
+        (push (lambda () captured) closures)))
+    (mapcar #'funcall (nreverse closures))))
+#+end_src
+
+* Repro 2 — deferred timer (matches the original CLAUDE.md trap)
+:PROPERTIES:
+:CUSTOM_ID: repro-timer
+:END:
+
+Mirrors the actual production bug: a ~let~-bound =backend= used inside
+a deferred lambda. Under dynamic binding, the symbol is unbound when
+the timer's lambda fires.
+
+#+begin_src elisp
+(defun literate-elisp-test-timer-capture ()
+  "Schedule a timer that returns BACKEND captured from outer let.
+Returns 'CAPTURED-OK on lexical binding, signals or returns nil otherwise."
+  (let ((backend 'my-backend)
+        (result nil)
+        (done nil))
+    (run-at-time 0 nil
+                 (lambda ()
+                   (setq result (condition-case err
+                                    backend
+                                  (void-variable
+                                   (cons 'void-variable err))))
+                   (setq done t)))
+    ;; spin the event loop until the timer fires
+    (while (not done) (sleep-for 0.01))
+    result))
+#+end_src
+
+* Repro 3 — =cl-letf= around process sentinel (literate-elisp lambda capture)
+:PROPERTIES:
+:CUSTOM_ID: repro-sentinel
+:END:
+
+The shape used by =claude-agent.org= and friends: ~let~ a session
+object, set a process sentinel that reads it on exit.
+
+#+begin_src elisp
+(defun literate-elisp-test-sentinel-capture ()
+  "Spawn `true' and let its sentinel report a captured session id.
+Returns 'session-42 on lexical binding, nil-or-error on dynamic."
+  (let ((session-id 'session-42)
+        (result nil)
+        (done nil))
+    (let ((proc (start-process "literate-elisp-test-true" nil "true")))
+      (set-process-sentinel
+       proc
+       (lambda (_p _ev)
+         (setq result (condition-case err
+                          session-id
+                        (void-variable (cons 'void-variable err))))
+         (setq done t))))
+    (while (not done) (sleep-for 0.01))
+    result))
+#+end_src
+
+* Runner — three-way verdict
+:PROPERTIES:
+:CUSTOM_ID: runner
+:END:
+
+#+begin_src elisp
+(defun literate-elisp-test-run-all ()
+  "Run all three repros and exit with 0 (pass) or non-zero (fail)."
+  (let* ((r1 (literate-elisp-test-closures))
+         (r2 (literate-elisp-test-timer-capture))
+         (r3 (literate-elisp-test-sentinel-capture))
+         (r1-ok (equal r1 '(0 1 2)))
+         (r2-ok (eq r2 'my-backend))
+         (r3-ok (eq r3 'session-42)))
+    (princ (format "Repro 1 (closures over let):     %s   got=%S (want=(0 1 2))\n"
+                   (if r1-ok "PASS" "FAIL") r1))
+    (princ (format "Repro 2 (timer captures backend): %s   got=%S (want=my-backend)\n"
+                   (if r2-ok "PASS" "FAIL") r2))
+    (princ (format "Repro 3 (sentinel captures id):   %s   got=%S (want=session-42)\n"
+                   (if r3-ok "PASS" "FAIL") r3))
+    (kill-emacs (if (and r1-ok r2-ok r3-ok) 0 1))))
+#+end_src
+
+* See also
+
+- =literate-elisp.el= section =literate-elisp-load= — load entry point
+- Emacs =src/lread.c= line ~1057 =get_lexical_binding= — official lookup path
+- Emacs =lisp/files.el= line 4303 =internal--get-default-lexical-binding= —
+  the hook the fix overrides

@@ -4,7 +4,7 @@
 
 ;; Author: Jingtao Xu <jingtaozf@gmail.com>
 ;; Created: 6 Dec 2018
-;; Version: 0.1
+;; Version: 0.2.0
 ;; Keywords: lisp docs extensions tools
 ;; URL: https://github.com/jingtaozf/literate-elisp
 ;; Package-Requires: ((emacs "26.1"))
@@ -472,6 +472,70 @@ Optional argument TEST-P ."
               (literate-elisp-org-code-blocks-p nil))
           (apply fn args)))
       (apply fn args))))
+
+(defvar literate-elisp--saved-default-lexical-binding-function
+  (and (boundp 'internal--get-default-lexical-binding-function)
+       internal--get-default-lexical-binding-function)
+  "Saved `internal--get-default-lexical-binding-function' for chain-through.
+Captured at the time `literate-elisp' was loaded; the hook below
+delegates to it for non-org files.")
+
+(defun literate-elisp--parse-lexical-cookie (path)
+  "Parse first line of PATH for `-*- lexical-binding: <val> -*-'.
+Return `:lex' if val is non-nil-ish, `:dyn' if explicitly nil/false/no,
+`:none' if no cookie present."
+  (with-temp-buffer
+    (insert-file-contents path nil 0 1024)
+    (let ((line (buffer-substring-no-properties
+                 (point-min)
+                 (min (point-max) (line-end-position)))))
+      (if (string-match "-\\*-\\(.*\\)-\\*-" line)
+          (let ((vars (match-string 1 line)))
+            (if (string-match
+                 "\\blexical-binding[ \t]*:[ \t]*\\([^ \t;]+\\)"
+                 vars)
+                (if (string-match-p
+                     "\\`\\(nil\\|false\\|no\\)\\'"
+                     (match-string 1 vars))
+                    :dyn :lex)
+              :none))
+        :none))))
+
+(defun literate-elisp--fallback-default-lexical-binding (from)
+  "Delegate to saved hook, or to global default if no hook existed."
+  (if (functionp literate-elisp--saved-default-lexical-binding-function)
+      (funcall literate-elisp--saved-default-lexical-binding-function from)
+    (default-toplevel-value 'lexical-binding)))
+
+(defun literate-elisp--get-default-lexical-binding (from)
+  "Replacement for `internal--get-default-lexical-binding-function'.
+For .org / .org.elc files, honour first-line `-*- lexical-binding: t -*-'.
+Chain to the original hook for every other file type.
+
+FROM is what `get_lexical_binding' in src/lread.c passes in:
+- a string (file path) when called from `Fload' directly, OR
+- a buffer (the temporary `*load*' buffer) when called via `eval-buffer'.
+For the buffer case, `buffer-file-name' is usually nil during load, so
+fall back to `load-file-name' which `Fload' specbinds to the real path."
+  (let* ((path (cond ((stringp from) from)
+                     ((bufferp from)
+                      (or (buffer-file-name from)
+                          (and (boundp 'load-file-name) load-file-name)))
+                     (t (and (boundp 'load-file-name) load-file-name)))))
+    (if (and path
+             (or (string-suffix-p ".org" path)
+                 (string-suffix-p ".org.elc" path)))
+        (pcase (literate-elisp--parse-lexical-cookie path)
+          (:lex t)
+          (:dyn nil)
+          (:none (literate-elisp--fallback-default-lexical-binding from)))
+      (literate-elisp--fallback-default-lexical-binding from))))
+
+(when (and (boundp 'internal--get-default-lexical-binding-function)
+           (not (eq internal--get-default-lexical-binding-function
+                    #'literate-elisp--get-default-lexical-binding)))
+  (setq internal--get-default-lexical-binding-function
+        #'literate-elisp--get-default-lexical-binding))
 
 (defvar literate-elisp-default-header-arguments-to-insert
     '((:name :load :property "literate-load" :desc "Source Code Load Type"

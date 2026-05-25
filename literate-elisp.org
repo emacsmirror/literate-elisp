@@ -37,6 +37,7 @@
     - [[#support-for-helpful][support for Helpful]]
   - [[#function-to-tangle-org-file-to-emacs-lisp-file][function to tangle Org file to Emacs Lisp file]]
   - [[#add-advice-to-emacs-native-load-function][add advice to Emacs native load function]]
+  - [[#lexical-binding-cookie-support-for-org-files][lexical-binding cookie support for .org files]]
 - [[#release-current-library][Release current library]]
 - [[#how-to-insert-code-block-in-org-file][How to insert code block in Org file]]
 - [[#how-to-import-source-files-into-org-subsection][How to import source files into org subsection]]
@@ -753,6 +754,117 @@ in your Emacs script like this:
 
 We will keep the routine =literate-elisp-load= for the compatibility with old releases.
 
+** lexical-binding cookie support for .org files
+By default Emacs determines a loaded file's =lexical-binding= by reading the first line via
+=lisp_file_lexical_cookie= in =src/lread.c=.  That function only recognises =;; -*- ... -*-=
+(Lisp comment) or =#! ... ; -*- ... -*-= (shebang) first lines.  An org file's first line is
+usually =# -*- mode: org -*-= — starts with =#= followed by a space (not =#!=) — so the cookie
+returns =Cookie_None= and Emacs falls back to the global default of =lexical-binding= (typically
+=nil=).  The result: every src block in an org file evaluates with *dynamic* binding,
+which breaks closures over =let= variables in =run-at-time= / =set-process-filter= /
+=set-process-sentinel= lambdas — they signal =void-variable= when fired later.
+
+Since Emacs 30, =get_lexical_binding= falls through to the Lisp variable
+=internal--get-default-lexical-binding-function= when no cookie is found.  We hook that
+function: for =.org= / =.org.elc= files we re-parse the first line for a =lexical-binding=
+directive; for everything else we chain to the original handler.
+
+Save the original hook so we can chain through.  This must run at load time, not lazily,
+or a reload of literate-elisp would overwrite the saved value with our own replacement.
+#+BEGIN_SRC elisp
+(defvar literate-elisp--saved-default-lexical-binding-function
+  (and (boundp 'internal--get-default-lexical-binding-function)
+       internal--get-default-lexical-binding-function)
+  "Saved `internal--get-default-lexical-binding-function' for chain-through.
+Captured at the time `literate-elisp' was loaded; the hook below
+delegates to it for non-org files.")
+#+END_SRC
+
+Parse the first line of a file for the cookie.  Returns =:lex= / =:dyn= / =:none=
+(=:none= = "no cookie present, defer to caller's default").
+#+BEGIN_SRC elisp
+(defun literate-elisp--parse-lexical-cookie (path)
+  "Parse first line of PATH for `-*- lexical-binding: <val> -*-'.
+Return `:lex' if val is non-nil-ish, `:dyn' if explicitly nil/false/no,
+`:none' if no cookie present."
+  (with-temp-buffer
+    (insert-file-contents path nil 0 1024)
+    (let ((line (buffer-substring-no-properties
+                 (point-min)
+                 (min (point-max) (line-end-position)))))
+      (if (string-match "-\\*-\\(.*\\)-\\*-" line)
+          (let ((vars (match-string 1 line)))
+            (if (string-match
+                 "\\blexical-binding[ \t]*:[ \t]*\\([^ \t;]+\\)"
+                 vars)
+                (if (string-match-p
+                     "\\`\\(nil\\|false\\|no\\)\\'"
+                     (match-string 1 vars))
+                    :dyn :lex)
+              :none))
+        :none))))
+#+END_SRC
+
+Helper to chain to the original handler.
+#+BEGIN_SRC elisp
+(defun literate-elisp--fallback-default-lexical-binding (from)
+  "Delegate to saved hook, or to global default if no hook existed."
+  (if (functionp literate-elisp--saved-default-lexical-binding-function)
+      (funcall literate-elisp--saved-default-lexical-binding-function from)
+    (default-toplevel-value 'lexical-binding)))
+#+END_SRC
+
+The hook itself.  =get_lexical_binding= in =src/lread.c= calls us with =FROM=
+which can be a string (file path, from direct =Fload=) or a buffer (the
+temporary =*load*= buffer, from =Feval_buffer=).  For the buffer case
+=buffer-file-name= is usually =nil= during load — we fall back to
+=load-file-name= which =Fload= specbinds to the real path while loading.
+#+BEGIN_SRC elisp
+(defun literate-elisp--get-default-lexical-binding (from)
+  "Replacement for `internal--get-default-lexical-binding-function'.
+For .org / .org.elc files, honour first-line `-*- lexical-binding: t -*-'.
+Chain to the original hook for every other file type.
+
+FROM is what `get_lexical_binding' in src/lread.c passes in:
+- a string (file path) when called from `Fload' directly, OR
+- a buffer (the temporary `*load*' buffer) when called via `eval-buffer'.
+For the buffer case, `buffer-file-name' is usually nil during load, so
+fall back to `load-file-name' which `Fload' specbinds to the real path."
+  (let* ((path (cond ((stringp from) from)
+                     ((bufferp from)
+                      (or (buffer-file-name from)
+                          (and (boundp 'load-file-name) load-file-name)))
+                     (t (and (boundp 'load-file-name) load-file-name)))))
+    (if (and path
+             (or (string-suffix-p ".org" path)
+                 (string-suffix-p ".org.elc" path)))
+        (pcase (literate-elisp--parse-lexical-cookie path)
+          (:lex t)
+          (:dyn nil)
+          (:none (literate-elisp--fallback-default-lexical-binding from)))
+      (literate-elisp--fallback-default-lexical-binding from))))
+#+END_SRC
+
+Install the hook.  The =boundp= check makes this a no-op on Emacs < 30; the =not eq=
+check makes it idempotent on reload (so we don't accidentally save our own replacement
+as the "original" the second time around).
+#+BEGIN_SRC elisp
+(when (and (boundp 'internal--get-default-lexical-binding-function)
+           (not (eq internal--get-default-lexical-binding-function
+                    #'literate-elisp--get-default-lexical-binding)))
+  (setq internal--get-default-lexical-binding-function
+        #'literate-elisp--get-default-lexical-binding))
+#+END_SRC
+
+After this hook is installed, an org file whose first line includes
+=lexical-binding: t= (e.g. =# -*- mode: org; lexical-binding: t; -*-=) loads
+with lexical binding; one without the cookie keeps the previous dynamic-binding
+default — backward compatible.
+
+Regression tests live at:
+- =tests/test-lexical-binding.org= (three repros that fail without the fix)
+- =tests/test-no-cookie.org= (no-cookie org stays dynamic)
+
 * Release current library
 And when a new version of [[./literate-elisp.el]] can release from this file,
 the following code should execute.
@@ -765,7 +877,7 @@ the following code should execute.
 
 ;; Author: Jingtao Xu <jingtaozf@gmail.com>
 ;; Created: 6 Dec 2018
-;; Version: 0.1
+;; Version: 0.2.0
 ;; Keywords: lisp docs extensions tools
 ;; URL: https://github.com/jingtaozf/literate-elisp
 ;; Package-Requires: ((emacs \"26.1\"))

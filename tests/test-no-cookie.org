@@ -1,0 +1,32 @@
+# -*- mode: org; -*-
+#+TITLE: Regression: org file WITHOUT lexical-binding cookie should keep current (dynamic) behaviour
+#+PROPERTY: literate-load yes
+
+* Why this file exists
+
+This file has NO ~lexical-binding~ cookie in the first line.  After the
+fix, ~literate-elisp-load~ should still load it with *dynamic* binding,
+exactly like before the fix.  Regression check.
+
+#+begin_src elisp
+(defun literate-elisp-test-no-cookie-result ()
+  "Return symbol describing the current binding mode.
+Returns 'lexical if closures capture, 'dynamic if they don't."
+  (let ((captured 'expected-value))
+    (let ((f (lambda () captured)))
+      (condition-case _
+          (let ((captured 'shadowed))
+            (funcall f))
+        (void-variable 'dynamic-void)))))
+#+end_src
+
+* Runner
+
+#+begin_src elisp
+(defun literate-elisp-test-no-cookie-run ()
+  (let ((r (literate-elisp-test-no-cookie-result)))
+    (princ (format "no-cookie file → %S (expect 'shadowed for dynamic, 'expected-value for lexical)\n"
+                   r))
+    ;; For regression: we expect 'shadowed (dynamic binding, the legacy behavior)
+    (kill-emacs (if (eq r 'shadowed) 0 1))))
+#+end_src
