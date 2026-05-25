@@ -141,10 +141,11 @@ first line, alongside the org mode marker:
 #+BEGIN_EXAMPLE
 # -*- mode: org; lexical-binding: t; -*-
 #+END_EXAMPLE
-That cookie is detected by ~literate-elisp~ at load time (Emacs 30+,
-via ~internal--get-default-lexical-binding-function~).  Org files without
-the cookie keep the legacy dynamic-binding behavior, so no existing file
-is affected.
+That cookie is detected by ~literate-elisp~ at load time on any Emacs
+that exposes ~internal--get-default-lexical-binding-function~ — that
+hook lives in master / future Emacs 31, no released 30.x has it yet.
+Older Emacs are unaffected: a ~boundp~ guard makes the cookie support
+a no-op, and org files keep their legacy dynamic-binding behavior.
 
 #+BEGIN_SRC elisp :load no
 ;; Same code, two different outcomes depending on first-line cookie:

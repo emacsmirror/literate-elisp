@@ -764,7 +764,7 @@ returns =Cookie_None= and Emacs falls back to the global default of =lexical-bin
 which breaks closures over =let= variables in =run-at-time= / =set-process-filter= /
 =set-process-sentinel= lambdas — they signal =void-variable= when fired later.
 
-Since Emacs 30, =get_lexical_binding= falls through to the Lisp variable
+On Emacs master (post-30.x; first release will be 31), =get_lexical_binding= falls through to the Lisp variable
 =internal--get-default-lexical-binding-function= when no cookie is found.  We hook that
 function: for =.org= / =.org.elc= files we re-parse the first line for a =lexical-binding=
 directive; for everything else we chain to the original handler.
@@ -845,7 +845,7 @@ fall back to `load-file-name' which `Fload' specbinds to the real path."
       (literate-elisp--fallback-default-lexical-binding from))))
 #+END_SRC
 
-Install the hook.  The =boundp= check makes this a no-op on Emacs < 30; the =not eq=
+Install the hook.  The =boundp= check makes this a no-op on any Emacs without the variable (every released Emacs as of 30.2; arrives in 31); the =not eq=
 check makes it idempotent on reload (so we don't accidentally save our own replacement
 as the "original" the second time around).
 #+BEGIN_SRC elisp

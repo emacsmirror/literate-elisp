@@ -31,11 +31,12 @@ jobs:
             --eval "(literate-elisp-load \"./tests/test-no-cookie.org\")" \
             --eval "(literate-elisp-test-no-cookie-run)"
 
-      - name: lexical-binding cookie repro — 3 lambda-capture tests (Emacs >= 30 only)
+      - name: lexical-binding cookie repro — 3 lambda-capture tests (snapshot only)
         # The fix requires `internal--get-default-lexical-binding-function',
-        # which lands in Emacs 30.  On 26.1 the boundp guard makes the fix
-        # a no-op and these repros would still fail by design.
-        if: matrix.emacs_version != '26.1'
+        # which lives in Emacs master (no released 30.x has it; will ship in 31).
+        # On older Emacs the boundp guard makes the fix a no-op, so these repros
+        # would still fail by design — exclude them.
+        if: matrix.emacs_version == 'snapshot'
         run: |
           emacs -Q --batch -L . -l literate-elisp \
             --eval "(literate-elisp-load \"./tests/test-lexical-binding.org\")" \
