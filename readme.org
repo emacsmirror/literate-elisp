@@ -12,35 +12,6 @@
 [[https://travis-ci.com/jingtaozf/literate-elisp][file:https://travis-ci.com/jingtaozf/literate-elisp.svg?branch=master]]
 [[https://github.com/jingtaozf/literate-elisp/actions][file:https://github.com/jingtaozf/literate-elisp/workflows/Continous%20Integration/badge.svg]]
 
-* Table of Contents                                                   :TOC:
-- [[#introduction][Introduction]]
-- [[#tutorial][Tutorial]]
-  - [[#install-polymode-in-emacs][install Polymode in Emacs]]
-  - [[#install-literate-elisp][install literate-elisp]]
-  - [[#how-to-insert-code-block-quickly][how to insert code block quickly]]
-  - [[#load-an-org-file][load an org file]]
-  - [[#byte-compile-an-org-file][byte compile an org file]]
-  - [[#lexical-binding-for-elisp-code-blocks][lexical binding for elisp code blocks]]
-  - [[#a-new-code-block-header-argument-load][a new code block header argument ~load~]]
-  - [[#compatibility-with-other-libraries][compatibility with other libraries]]
-    - [[#support-for-emacs-lisp-refs][support for Emacs Lisp-Refs]]
-    - [[#support-for-library-helpful][support for library helpful]]
-- [[#faq][FAQ]]
-  - [[#what-can-i-do-when-it-failed-to-load-some-file][What can I do when it failed to load some file]]
-  - [[#can-i-use-autoload-for-a-elisp-routine-in-an-org-file][Can I use =autoload= for a Elisp routine in an org file?]]
-- [[#demo-routines][demo routines]]
-  - [[#a-demo-macro][a demo macro]]
-- [[#a-demo-emacs-configuration][a demo Emacs configuration]]
-  - [[#a-demo-configuration][a demo configuration]]
-    -  [[#enable-org-mode-for-org-files][enable org mode for org files]]
-  - [[#load-this-org-file-in-emacs][load this org file in .emacs]]
-  - [[#packages-written-by-literate-elisp][packages written by literate-elisp]]
-- [[#test][Test]]
-  - [[#introduction-1][Introduction]]
-  - [[#test-macro-aif][test macro aif]]
-  - [[#test-org-mode-configuration][test org mode configuration]]
-- [[#copyright-and-license][Copyright and license]]
-
 * Introduction
 [[https://github.com/jingtaozf/literate-elisp][literate-elisp]] is an Emacs lisp library to provide an easy way to use [[http://www.literateprogramming.com/][literal programming]] in Emacs lisp.
 
