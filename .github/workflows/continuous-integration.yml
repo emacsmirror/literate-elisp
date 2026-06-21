@@ -6,10 +6,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 26.1 = Package-Requires floor.  30.1 = first version with
-        # `internal--get-default-lexical-binding-function' (the hook the
-        # cookie support relies on).  snapshot = current master, future-proofing.
-        emacs_version: ['26.1', '30.1', 'snapshot']
+        # Support policy: Emacs > 30.0 only.  30.1 = Package-Requires floor and
+        # first version with `internal--get-default-lexical-binding-function'
+        # (the hook the cookie support relies on).  snapshot = current master.
+        emacs_version: ['30.1', 'snapshot']
     steps:
       - uses: actions/checkout@v4
       - uses: purcell/setup-emacs@master

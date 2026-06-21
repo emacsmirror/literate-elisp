@@ -833,7 +833,7 @@ the following code should execute.
 ;; Version: 0.2.0
 ;; Keywords: lisp docs extensions tools
 ;; URL: https://github.com/jingtaozf/literate-elisp
-;; Package-Requires: ((emacs \"26.1\"))
+;; Package-Requires: ((emacs \"30.1\"))
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
